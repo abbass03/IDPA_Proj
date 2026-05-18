@@ -43,6 +43,7 @@ class PreprocessTests(unittest.TestCase):
 
         self.assertEqual(node.value, "10452 km2")
         self.assertTrue(any(child.label == "parsed_measurement" for child in node.children))
+        self.assertFalse(any(child.label == "tokenized_value" for child in node.children))
 
     def test_simple_single_word_value_is_not_overexpanded(self) -> None:
         node = Node(label="#text", node_type="text", value="Lebanon")

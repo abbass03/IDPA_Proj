@@ -17,7 +17,7 @@ from ted_custom import update_cost
 
 class SemanticTedTests(unittest.TestCase):
     def test_close_measurements_have_low_distance(self) -> None:
-        self.assertEqual(semantic_value_distance("10452 km2", "10450 km2"), 0)
+        self.assertEqual(semantic_value_distance("10452 km2", "10450 km2"), 1)
 
     def test_different_measurements_have_higher_distance(self) -> None:
         self.assertGreaterEqual(semantic_value_distance("10452 km2", "30000 km2"), 2)
@@ -38,6 +38,9 @@ class SemanticTedTests(unittest.TestCase):
         far = Node(label="#text", node_type="text", value="30000 km2")
 
         self.assertLess(update_cost(left, right), update_cost(left, far))
+
+    def test_close_measurements_are_not_treated_as_identical(self) -> None:
+        self.assertGreater(semantic_value_distance("11000 km2", "10451 km2"), 0)
 
 
 if __name__ == "__main__":

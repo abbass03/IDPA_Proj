@@ -16,6 +16,7 @@
     <div class="nav-tabs">
         <button class="nav-btn active" data-section="comparison">Project 1 — Comparison</button>
         <button class="nav-btn" data-section="clustering">Project 2 — Clustering</button>
+        <button class="nav-btn" data-section="live">Live Country Lab</button>
     </div>
 </nav>
 
@@ -339,6 +340,93 @@
     </main>
 </div>
 </div><!-- /clusteringSection -->
+
+<div id="liveSection" style="display:none">
+<div class="page-shell">
+    <aside class="control-panel">
+        <div class="brand-block">
+            <p class="eyebrow">Live Demo Mode</p>
+            <h1>Country Lab</h1>
+            <p class="lede">Add new XML countries live, compare them instantly, and run small live clustering without rebuilding the full matrix.</p>
+        </div>
+
+        <div class="control-card">
+            <h2>Add Country XML</h2>
+            <label for="liveNameInput">Country Name</label>
+            <input id="liveNameInput" type="text" placeholder="Example: Kosovo">
+            <label for="liveXmlInput">XML Content</label>
+            <textarea id="liveXmlInput" class="live-textarea" placeholder="Paste a full country XML document here..."></textarea>
+            <button id="liveAddButton" class="primary-button" type="button">Save Live Country</button>
+        </div>
+
+        <div class="control-card">
+            <h2>Live Comparison</h2>
+            <label for="liveMethodSelect">TED Method</label>
+            <select id="liveMethodSelect"></select>
+            <label for="liveCompareA">Document A</label>
+            <select id="liveCompareA"></select>
+            <label for="liveCompareB">Document B</label>
+            <select id="liveCompareB"></select>
+            <button id="liveCompareButton" class="primary-button" type="button">Run Live Comparison</button>
+        </div>
+
+        <div class="control-card">
+            <h2>Live Clustering</h2>
+            <label for="liveClusterMethodSelect">TED Method</label>
+            <select id="liveClusterMethodSelect"></select>
+            <label for="liveClusterAlgorithm">Algorithm</label>
+            <select id="liveClusterAlgorithm">
+                <option value="ahc">Agglomerative</option>
+                <option value="kmedoids">K-Medoids</option>
+            </select>
+            <label for="liveClusterK">Target Clusters</label>
+            <input id="liveClusterK" type="number" min="2" value="3">
+            <label for="liveClusterLinkage">Linkage</label>
+            <select id="liveClusterLinkage">
+                <option value="average">Average</option>
+                <option value="complete">Complete</option>
+                <option value="single">Single</option>
+            </select>
+            <label>Documents For Live Clustering</label>
+            <div id="liveClusterFiles" class="country-list live-file-list"></div>
+            <button id="liveClusterButton" class="primary-button" type="button">Run Live Clustering</button>
+        </div>
+    </aside>
+
+    <main class="workspace">
+        <section class="hero-panel">
+            <div>
+                <p class="eyebrow">Live Country Testing</p>
+                <h2>Handle new countries on the spot without touching the full 193-country matrix.</h2>
+            </div>
+            <div id="liveStatusPill" class="status-pill idle">Ready</div>
+        </section>
+
+        <div class="two-column">
+            <article class="content-card">
+                <h3>Available Live Documents</h3>
+                <pre id="liveDocsView" class="code-block empty-state">Loading live documents...</pre>
+            </article>
+            <article class="content-card">
+                <h3>Live Comparison Result</h3>
+                <pre id="liveCompareSummary" class="code-block empty-state">Run a live comparison to see summary metrics.</pre>
+                <pre id="liveCompareReport" class="code-block empty-state">Run a live comparison to see the report.</pre>
+            </article>
+        </div>
+
+        <div class="two-column">
+            <article class="content-card">
+                <h3>Live Clustering Result</h3>
+                <pre id="liveClusterReport" class="code-block empty-state">Run live clustering to see the result.</pre>
+            </article>
+            <article class="content-card">
+                <h3>Live Distance Matrix</h3>
+                <div id="liveMatrixView" class="matrix-wrapper empty-state">Run live clustering to inspect the distance matrix.</div>
+            </article>
+        </div>
+    </main>
+</div>
+</div><!-- /liveSection -->
 
 <script src="app.js"></script>
 </body>

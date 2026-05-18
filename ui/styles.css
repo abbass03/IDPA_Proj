@@ -566,6 +566,23 @@ button:hover {
     cursor: pointer;
 }
 
+.live-file-list {
+    max-height: 220px;
+}
+
+.live-textarea {
+    width: 100%;
+    min-height: 220px;
+    background: rgba(4,14,24,0.9);
+    color: var(--text);
+    border: 1px solid rgba(160,204,219,0.18);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font: inherit;
+    box-sizing: border-box;
+    resize: vertical;
+}
+
 /* Algorithm params */
 .algo-params {
     margin-top: 4px;

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -9,11 +10,14 @@ from urllib.parse import parse_qs, urlparse
 
 from comparison_service import compare_documents
 from cluster_service import available_countries, extract_submatrix, run_clustering as _run_clustering
+from distance_matrix import compute_distance_matrix_from_files
+from clustering import agglomerative_clustering, kmedoids_clustering, dunn_index, silhouette_score
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 UI_DIR = PROJECT_ROOT / "ui"
 DATA_DIR = PROJECT_ROOT / "data"
+LIVE_XML_DIR = DATA_DIR / "live_xml"
 HOST = "127.0.0.1"
 PORT = 8765
 
@@ -41,6 +45,68 @@ def list_relative_files(folder: Path, suffix: str) -> list[str]:
         return []
     files = [path.relative_to(PROJECT_ROOT).as_posix() for path in folder.glob(f"*{suffix}") if path.is_file()]
     return sorted(files)
+
+
+def slugify_name(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower())
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug or "country"
+
+
+def list_live_files() -> list[str]:
+    LIVE_XML_DIR.mkdir(parents=True, exist_ok=True)
+    return list_relative_files(LIVE_XML_DIR, ".xml")
+
+
+def save_live_xml(name: str, xml_text: str) -> str:
+    from parser import parse_xml_file
+
+    LIVE_XML_DIR.mkdir(parents=True, exist_ok=True)
+    slug = slugify_name(name)
+    path = LIVE_XML_DIR / f"{slug}.xml"
+    path.write_text(xml_text, encoding="utf-8")
+    parse_xml_file(str(path))
+    return path.relative_to(PROJECT_ROOT).as_posix()
+
+
+def combine_cluster_metrics(countries: list[str], matrix: list[list[int]], assignments: dict[str, int]) -> dict[str, float | None]:
+    valid = [c for c in countries if assignments.get(c, -1) != -1]
+    unique_ids = {assignments[c] for c in valid}
+    if len(valid) < 2 or len(unique_ids) < 2:
+        return {"silhouette": None, "dunn": None}
+
+    vi = [countries.index(c) for c in valid]
+    vm = [[matrix[r][c] for c in vi] for r in vi]
+    va = {c: assignments[c] for c in valid}
+    sil, _ = silhouette_score(valid, vm, va)
+    di = dunn_index(valid, vm, va)
+    return {"silhouette": round(sil, 4), "dunn": round(di, 4)}
+
+
+def run_live_clustering(files: list[str], method: str, algorithm: str, params: dict) -> dict:
+    countries, matrix = compute_distance_matrix_from_files(files, method=method, preprocess=True)
+    pretty_names = [Path(path).stem for path in files]
+
+    if algorithm == "ahc":
+        k = int(params.get("n_clusters", 3))
+        linkage = str(params.get("linkage", "average"))
+        result = agglomerative_clustering(pretty_names, matrix, n_clusters=k, linkage=linkage)
+    elif algorithm == "kmedoids":
+        k = int(params.get("k", 3))
+        result = kmedoids_clustering(pretty_names, matrix, k=k)
+    else:
+        raise ValueError("Live clustering supports only AHC and k-medoids.")
+
+    result["countries"] = pretty_names
+    result["files"] = files
+    result["matrix"] = matrix
+    result["metrics"] = combine_cluster_metrics(pretty_names, matrix, result.get("assignments", {}))
+    result["cluster_members"] = {
+        str(k): v for k, v in result.get("cluster_members", {}).items()
+    }
+    if "noise" not in result:
+        result["noise"] = []
+    return result
 
 
 def safe_project_path(relative_path: str) -> Path:
@@ -83,6 +149,19 @@ class UIRequestHandler(BaseHTTPRequestHandler):
             try:
                 countries = available_countries()
                 json_response(self, {"countries": countries})
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+
+        if parsed.path == "/api/live/files":
+            try:
+                json_response(
+                    self,
+                    {
+                        "built_in": list_relative_files(DATA_DIR / "normalized_xml", ".xml"),
+                        "live": list_live_files(),
+                    },
+                )
             except Exception as exc:
                 json_response(self, {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
@@ -136,6 +215,87 @@ class UIRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/live/add":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                json_response(self, {"error": "Invalid JSON."}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            name = str(payload.get("name", "")).strip()
+            xml_text = str(payload.get("xml", "")).strip()
+            if not name or not xml_text:
+                json_response(self, {"error": "Both name and xml are required."}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                relative_path = save_live_xml(name, xml_text)
+                json_response(self, {"path": relative_path, "live": list_live_files()})
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/live/compare":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                json_response(self, {"error": "Invalid JSON."}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            method = str(payload.get("method", "custom")).lower()
+            file1 = str(payload.get("file1", ""))
+            file2 = str(payload.get("file2", ""))
+            if method not in {"custom", "chawathe", "nj"}:
+                json_response(self, {"error": "Unsupported method."}, status=HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                abs_file1 = safe_project_path(file1)
+                abs_file2 = safe_project_path(file2)
+                result = compare_documents(
+                    mode="xml",
+                    file1=os.fspath(abs_file1),
+                    file2=os.fspath(abs_file2),
+                    method=method,
+                    output_dir=os.fspath(DATA_DIR / "output"),
+                )
+                json_response(self, result)
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/live/cluster":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                json_response(self, {"error": "Invalid JSON."}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            files = payload.get("files", [])
+            method = str(payload.get("method", "custom")).lower()
+            algorithm = str(payload.get("algorithm", "ahc")).lower()
+            params = payload.get("params", {})
+
+            if not isinstance(files, list) or len(files) < 2:
+                json_response(self, {"error": "Select at least two XML files."}, status=HTTPStatus.BAD_REQUEST)
+                return
+            if method not in {"custom", "chawathe", "nj"}:
+                json_response(self, {"error": "Unsupported method."}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                safe_files = [os.fspath(safe_project_path(path)) for path in files]
+                result = run_live_clustering(safe_files, method, algorithm, params)
+                json_response(self, result)
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == "/api/cluster/run":
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length)

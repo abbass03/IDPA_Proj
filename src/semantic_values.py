@@ -259,13 +259,15 @@ def semantic_value_distance(left: str | None, right: str | None) -> int:
         baseline = max(abs(left_num), abs(right_num), 1.0)
         relative_delta = abs(left_num - right_num) / baseline
 
+        # Keep close numbers cheaper than far numbers, but not identical.
+        # Exact-zero here can make TED and patch validation disagree.
         if relative_delta <= 0.01:
-            return 0
-        if relative_delta <= 0.10:
             return 1
-        if relative_delta <= 0.50:
+        if relative_delta <= 0.10:
             return 2
-        return 3
+        if relative_delta <= 0.50:
+            return 3
+        return 4
 
     tokens_a = set(a["tokens"])
     tokens_b = set(b["tokens"])

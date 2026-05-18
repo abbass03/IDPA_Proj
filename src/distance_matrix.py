@@ -32,6 +32,17 @@ def load_trees(xml_files: list[Path], preprocess: bool = False) -> list[tuple[st
     return result
 
 
+def load_trees_from_paths(xml_files: list[str | Path], preprocess: bool = False) -> list[tuple[str, Node]]:
+    result = []
+    for file_path in xml_files:
+        path = Path(file_path)
+        tree = parse_xml_file(str(path))
+        if preprocess:
+            tree = preprocess_tree(tree)
+        result.append((path.stem, tree))
+    return result
+
+
 def compute_distance_matrix(
     trees: list[tuple[str, Node]],
     method: str = "nj",
@@ -110,3 +121,13 @@ def build_and_save(
     countries, matrix = compute_distance_matrix(trees, method=method, progress_cb=progress_cb)
     save_matrix(countries, matrix, method=method, top_k=top_k, preprocess=preprocess)
     return countries, matrix
+
+
+def compute_distance_matrix_from_files(
+    xml_files: list[str | Path],
+    method: str = "nj",
+    preprocess: bool = True,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> tuple[list[str], list[list[int]]]:
+    trees = load_trees_from_paths(xml_files, preprocess=preprocess)
+    return compute_distance_matrix(trees, method=method, progress_cb=progress_cb)

@@ -66,6 +66,10 @@ def build_token_analysis(text: str) -> Node | None:
     tokens = tokenize_text(text)
     if not tokens or not should_dissect_text(text, tokens):
         return None
+    if parse_date_components(text) is not None:
+        return None
+    if parse_measurement(text) is not None:
+        return None
 
     token_root = Node(label="tokenized_value", node_type="element")
 

@@ -275,6 +275,34 @@ const cState = {
     activeTab: "scatter",
 };
 
+const liveState = {
+    builtIn: [],
+    live: [],
+};
+
+const liveElements = {
+    section: document.getElementById("liveSection"),
+    nameInput: document.getElementById("liveNameInput"),
+    xmlInput: document.getElementById("liveXmlInput"),
+    addButton: document.getElementById("liveAddButton"),
+    methodSelect: document.getElementById("liveMethodSelect"),
+    compareA: document.getElementById("liveCompareA"),
+    compareB: document.getElementById("liveCompareB"),
+    compareButton: document.getElementById("liveCompareButton"),
+    clusterMethodSelect: document.getElementById("liveClusterMethodSelect"),
+    clusterAlgorithm: document.getElementById("liveClusterAlgorithm"),
+    clusterK: document.getElementById("liveClusterK"),
+    clusterLinkage: document.getElementById("liveClusterLinkage"),
+    clusterFiles: document.getElementById("liveClusterFiles"),
+    clusterButton: document.getElementById("liveClusterButton"),
+    statusPill: document.getElementById("liveStatusPill"),
+    docsView: document.getElementById("liveDocsView"),
+    compareSummary: document.getElementById("liveCompareSummary"),
+    compareReport: document.getElementById("liveCompareReport"),
+    clusterReport: document.getElementById("liveClusterReport"),
+    matrixView: document.getElementById("liveMatrixView"),
+};
+
 /* ── Section switcher ─────────────────────────────────────────────────── */
 document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -283,6 +311,7 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
         const sec = btn.dataset.section;
         document.getElementById("comparisonSection").style.display  = sec === "comparison"  ? "" : "none";
         document.getElementById("clusteringSection").style.display  = sec === "clustering"  ? "" : "none";
+        document.getElementById("liveSection").style.display        = sec === "live" ? "" : "none";
     });
 });
 
@@ -316,6 +345,259 @@ function renderCountryList() {
 
 function updateSelectionBadge() {
     document.getElementById("selectedCount").textContent = `${cState.selected.size} selected`;
+}
+
+function setLiveStatus(label, kind) {
+    liveElements.statusPill.textContent = label;
+    liveElements.statusPill.className = `status-pill ${kind}`;
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+        const text = await response.text();
+        const hint = text.includes("<!DOCTYPE") || text.includes("<html")
+            ? "The UI server is likely still running the old code. Restart python src/ui_server.py and hard refresh the browser."
+            : fallbackMessage;
+        throw new Error(hint);
+    }
+
+    const payload = await response.json();
+    if (!response.ok) {
+        throw new Error(payload.error || fallbackMessage);
+    }
+    return payload;
+}
+
+function liveFilesCombined() {
+    return [...liveState.builtIn, ...liveState.live];
+}
+
+function renderLiveFileOptions() {
+    const files = liveFilesCombined();
+    fillSelect(liveElements.compareA, files);
+    fillSelect(liveElements.compareB, files);
+    fillSelect(liveElements.methodSelect, state.options?.methods || ["custom", "chawathe", "nj"]);
+    fillSelect(liveElements.clusterMethodSelect, state.options?.methods || ["custom", "chawathe", "nj"]);
+    if (files.length > 1) {
+        liveElements.compareB.selectedIndex = 1;
+    }
+
+    liveElements.clusterFiles.innerHTML = "";
+    files.forEach((file) => {
+        const item = document.createElement("label");
+        item.className = "country-item";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = file;
+        cb.checked = liveState.live.includes(file);
+        item.appendChild(cb);
+        item.append(" " + file.replace("data/normalized_xml/", "").replace("data/live_xml/", ""));
+        liveElements.clusterFiles.appendChild(item);
+    });
+
+    const allLines = [
+        `Built-in XML files: ${liveState.builtIn.length}`,
+        `Live XML files: ${liveState.live.length}`,
+        "",
+        ...liveState.live,
+    ];
+    liveElements.docsView.textContent = allLines.join("\n");
+    liveElements.docsView.classList.remove("empty-state");
+}
+
+async function refreshLiveFiles() {
+    const r = await fetch("/api/live/files");
+    const payload = await readJsonResponse(r, "Could not load live files.");
+    liveState.builtIn = payload.built_in || [];
+    liveState.live = payload.live || [];
+    renderLiveFileOptions();
+}
+
+async function runLiveCompare() {
+    setLiveStatus("Comparing", "loading");
+    liveElements.compareButton.disabled = true;
+    try {
+        const r = await fetch("/api/live/compare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                method: liveElements.methodSelect.value,
+                file1: liveElements.compareA.value,
+                file2: liveElements.compareB.value,
+            }),
+        });
+        const payload = await readJsonResponse(r, "Live comparison failed.");
+        const summaryLines = [
+            `Distance: ${payload.stats.distance}`,
+            `Similarity: ${payload.stats.similarity}`,
+            `Patch: ${payload.patch.success ? "Valid" : "Mismatch"}`,
+            `Visible operations: ${payload.summary.total_visible}`,
+            `Tree 1 nodes: ${payload.stats.tree1_nodes}`,
+            `Tree 2 nodes: ${payload.stats.tree2_nodes}`,
+            `Inserts: ${payload.summary.insert}`,
+            `Deletes: ${payload.summary.delete}`,
+            `Updates: ${payload.summary.update}`,
+        ];
+        liveElements.compareSummary.textContent = summaryLines.join("\n");
+        liveElements.compareSummary.classList.remove("empty-state");
+        liveElements.compareReport.textContent = payload.outputs.report;
+        liveElements.compareReport.classList.remove("empty-state");
+        setLiveStatus("Comparison Ready", "success");
+    } catch (err) {
+        liveElements.compareSummary.textContent = err.message;
+        liveElements.compareSummary.classList.remove("empty-state");
+        liveElements.compareReport.textContent = err.message;
+        liveElements.compareReport.classList.remove("empty-state");
+        setLiveStatus("Error", "error");
+    } finally {
+        liveElements.compareButton.disabled = false;
+    }
+}
+
+async function saveLiveCountry() {
+    const name = liveElements.nameInput.value.trim();
+    const xml = liveElements.xmlInput.value.trim();
+    if (!name || !xml) {
+        setLiveStatus("Name and XML required", "error");
+        return;
+    }
+    setLiveStatus("Saving", "loading");
+    liveElements.addButton.disabled = true;
+    try {
+        const r = await fetch("/api/live/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, xml }),
+        });
+        await readJsonResponse(r, "Could not save live country.");
+        liveElements.nameInput.value = "";
+        liveElements.xmlInput.value = "";
+        await refreshLiveFiles();
+        setLiveStatus("Live country saved", "success");
+    } catch (err) {
+        setLiveStatus("Error", "error");
+        liveElements.docsView.textContent = err.message;
+        liveElements.docsView.classList.remove("empty-state");
+    } finally {
+        liveElements.addButton.disabled = false;
+    }
+}
+
+function selectedLiveClusterFiles() {
+    return [...liveElements.clusterFiles.querySelectorAll("input[type='checkbox']:checked")].map((cb) => cb.value);
+}
+
+function renderSimpleMatrix(container, labels, matrix) {
+    container.innerHTML = "";
+    if (!labels.length || !matrix.length) {
+        container.textContent = "No matrix available.";
+        container.classList.add("empty-state");
+        return;
+    }
+
+    container.classList.remove("empty-state");
+    const table = document.createElement("table");
+    table.className = "matrix-table";
+
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    const corner = document.createElement("th");
+    corner.textContent = "Doc";
+    headRow.appendChild(corner);
+    labels.forEach((label) => {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    let minD = Infinity;
+    let maxD = -Infinity;
+    for (let i = 0; i < matrix.length; i++) {
+        for (let j = 0; j < matrix.length; j++) {
+            if (i === j) continue;
+            minD = Math.min(minD, matrix[i][j]);
+            maxD = Math.max(maxD, matrix[i][j]);
+        }
+    }
+    const range = Math.max(maxD - minD, 1);
+
+    const tbody = document.createElement("tbody");
+    matrix.forEach((row, i) => {
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.textContent = labels[i];
+        tr.appendChild(th);
+        row.forEach((value, j) => {
+            const td = document.createElement("td");
+            td.textContent = String(value);
+            const t = i === j ? 0 : (value - minD) / range;
+            td.style.background = i === j
+                ? "rgba(26,46,66,0.85)"
+                : `rgba(53, 208, 186, ${Math.max(0.06, 0.45 * (1 - t))})`;
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+}
+
+async function runLiveCluster() {
+    const files = selectedLiveClusterFiles();
+    if (files.length < 2) {
+        setLiveStatus("Select at least 2 files", "error");
+        return;
+    }
+
+    setLiveStatus("Clustering", "loading");
+    liveElements.clusterButton.disabled = true;
+    try {
+        const algorithm = liveElements.clusterAlgorithm.value;
+        const params = algorithm === "ahc"
+            ? { n_clusters: Number(liveElements.clusterK.value), linkage: liveElements.clusterLinkage.value }
+            : { k: Number(liveElements.clusterK.value) };
+
+        const r = await fetch("/api/live/cluster", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                files,
+                method: liveElements.clusterMethodSelect.value,
+                algorithm,
+                params,
+            }),
+        });
+        const payload = await readJsonResponse(r, "Live clustering failed.");
+
+        const lines = [
+            `Algorithm: ${payload.algorithm}`,
+            `Countries: ${payload.countries.length}`,
+            `Silhouette: ${payload.metrics.silhouette ?? "N/A"}`,
+            `Dunn index: ${payload.metrics.dunn ?? "N/A"}`,
+            "",
+            "Cluster members:",
+            JSON.stringify(payload.cluster_members, null, 2),
+        ];
+        liveElements.clusterReport.textContent = lines.join("\n");
+        liveElements.clusterReport.classList.remove("empty-state");
+        renderSimpleMatrix(
+            liveElements.matrixView,
+            payload.countries.map((country) => prettyName(country)),
+            payload.matrix || [],
+        );
+        setLiveStatus("Clustering Ready", "success");
+    } catch (err) {
+        liveElements.clusterReport.textContent = err.message;
+        liveElements.clusterReport.classList.remove("empty-state");
+        liveElements.matrixView.textContent = err.message;
+        liveElements.matrixView.classList.remove("empty-state");
+        setLiveStatus("Error", "error");
+    } finally {
+        liveElements.clusterButton.disabled = false;
+    }
 }
 
 document.getElementById("countrySearch").addEventListener("input", renderCountryList);
@@ -802,9 +1084,27 @@ async function initClustering() {
     }
 }
 
+async function initLiveLab() {
+    try {
+        setLiveStatus("Loading", "loading");
+        await refreshLiveFiles();
+        setLiveStatus("Ready", "idle");
+    } catch (e) {
+        console.error("Could not load live lab:", e);
+        setLiveStatus("Error", "error");
+        liveElements.docsView.textContent = e.message;
+        liveElements.docsView.classList.remove("empty-state");
+    }
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════
    BOOTSTRAP
    ═══════════════════════════════════════════════════════════════════════ */
 initComparison();
 initClustering();
+initLiveLab();
+
+liveElements.addButton.addEventListener("click", saveLiveCountry);
+liveElements.compareButton.addEventListener("click", runLiveCompare);
+liveElements.clusterButton.addEventListener("click", runLiveCluster);

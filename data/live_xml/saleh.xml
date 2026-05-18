@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<country>
+  <name>Iceland Demo</name>
+  <capital>Reykjavik</capital>
+  <area_total>103000 km2</area_total>
+  <population_total>393000</population_total>
+  <official_language>Icelandic</official_language>
+</country>
